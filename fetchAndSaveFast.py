@@ -134,7 +134,7 @@ def setup_scope(scope, nsequence: int = 1, b16acq: bool = True, screen_off: bool
     # set time base
     scope.send("TDIV 100US")
     # set memory size
-    scope.send("MSIZ 50M")
+    # scope.send("MSIZ 50M")
     settings = scope.get_settings()
     sequence_count = get_sequence_count(settings)
     if nsequence != sequence_count:
@@ -187,7 +187,14 @@ def fetchAndSaveFast(
     logging.info("Active channels %s", active_channels)
 
     logging.info("Opening file %s", filename)
-    f = h5py.File(filename, mode="w", driver="core")
+
+    import io
+
+    buf = io.BytesIO(b"")
+    f = h5py.File(buf, mode="w", driver="fileobj")
+
+    # f = h5py.File(filename, mode="w", driver="core")
+
     for command, setting in settings.items():
         f.attrs[command] = setting
     current_dim = {}
@@ -206,7 +213,6 @@ def fetchAndSaveFast(
         # Save attributes of each channel in the file
         for key, value in wave_desc.items():
             try:
-                logging.info("Setting key %s and value %s", key, value)
                 f[f"c{channel}_samples"].attrs[key] = value
             except ValueError:
                 pass
@@ -236,25 +242,38 @@ def fetchAndSaveFast(
                 logging.info("Acquiring data for event %d", i)
                 for channel in active_channels:
                     logging.info("Asking scope for channel %d data", channel)
+                    time_now = time.time()
                     (
                         wave_desc,
                         trg_times,
                         trg_offsets,
                         wave_array,
                     ) = scope.get_waveform_all(channel)
-
-                    logging.info("Channel %d data ready", channel)
+                    logging.info("Channel %d data ready, took %.3f s", channel, time.time() - time_now)
+                    time_now = time.time()
                     num_samples = wave_desc["wave_array_count"] // sequence_count
                     num_samples_toSave = int(1 * num_samples)  ##TORemove
                     if current_dim[channel] < num_samples_toSave:
                         current_dim[channel] = num_samples_toSave
                         f[f"c{channel}_samples"].resize(current_dim[channel], 1)
+                    logging.info("c%d_samples resized, took %.3f s", channel, time.time() - time_now)
+                    time_now = time.time()
                     traces = wave_array.reshape(sequence_count, wave_array.size // sequence_count)
+                    logging.info("traces resized, took %.3f s", time.time() - time_now)
+                    time_now = time.time()
                     # necessary because h5py does not like indexing and this is the fastest (and man is it slow) way
                     scratch = np.zeros((current_dim[channel],), dtype=wave_array.dtype)
+                    logging.info("zeros allocated, took %.3f s", time.time() - time_now)
+                    time_now = time.time()
+                    before_metadata_loop = time.time()
                     for n in range(sequence_count):
+                        logging.info("starting desc for sequence %d", n)
                         scratch[0:num_samples] = traces[n][:num_samples_toSave]
+                        logging.info("saved sequence %d traces to scratch, took %.3f s", n, time.time() - time_now)
+                        time_now = time.time()
                         f[f"c{channel}_samples"][i + n] = scratch
+                        logging.info("saved sequence %d traces to f, took %.3f s", n, time.time() - time_now)
+                        time_now = time.time()
                         f[f"c{channel}_vert_offset"][i + n] = wave_desc["vertical_offset"]
                         f[f"c{channel}_vert_scale"][i + n] = wave_desc["vertical_gain"]
                         f[f"c{channel}_horiz_offset"][i + n] = wave_desc["horiz_offset"]
@@ -264,7 +283,12 @@ def fetchAndSaveFast(
                             f[f"c{channel}_trig_offset"][i + n] = trg_offsets[n]
                         if len(trg_times) > 0:
                             f[f"c{channel}_trig_time"][i + n] = trg_times[n]
-                    logging.info("Channel %d data packed in HDF", channel)
+                        logging.info("saved sequence %d other stuff to f, took %.3f s", n, time.time() - time_now)
+                        time_now = time.time()
+                    logging.info(
+                        "Whole sequence data and metadata loop, took %.3f s", time.time() - before_metadata_loop
+                    )
+                    logging.info("Channel %d data packed in HDF,", channel)
 
             except Exception as e:
                 print("Error\n" + str(e))
@@ -299,7 +323,12 @@ def fetchAndSaveFast(
                 )
         logging.info("Starting to close the file")
         f.close()
-        logging.info("File close, starting to clear scope")
+
+        time_now = time.time()
+        with open(filename, "wb") as outfile:
+            outfile.write(buf.getbuffer())
+
+        logging.info("File close, starting to clear scope, took %.3f s", time.time() - time_now)
         size_bytes = os.path.getsize(filename)
         print(f"Size on disk: {size_human_readable(size_bytes)}")
         teardown_scope(scope=scope)
