@@ -381,14 +381,9 @@ class LeCrunch3(object):
         if channel not in range(1, 5):
             raise Exception("channel must be in %s." % str(range(1, 5)))
 
-        # self.send("comm_header off")
         self.send("c%s:wf? all" % str(channel))
 
-        import time
-
-        time_now = time.time()
         msg = self.recv()
-        logging.debug("Receiving data took %.3f s", time.time() - time_now)
 
         if not int(chr(msg[1])) == channel:
             raise RuntimeError("waveforms out of sync or comm_header is off.")

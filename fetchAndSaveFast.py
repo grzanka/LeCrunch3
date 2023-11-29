@@ -81,7 +81,7 @@ def get_optimal_prefix(number, tolerance=1e-10):
         return "0"
 
     # Calculate the exponent without rounding
-    exp_exact = log10(abs(number)) / 3 * 3
+    exp_exact = log10(abs(number)) // 3 * 3
 
     # Round up only if very close to the next integer
     exp_rounded = exp_exact if abs(exp_exact % 3) > tolerance else round(exp_exact)
@@ -114,6 +114,11 @@ def setup_scope(scope, nsequence: int = 1, save_in_16bits: bool = True) -> dict:
     scope.clear()
     scope.set_sequence_mode(nsequence)
     logging.info("Mode set to %d sequences", nsequence)
+
+    # optionally set maximum sample points per segment
+    # scope.send("MSIZ 10M")
+    # scope.check_last_command()
+
     if save_in_16bits:
         scope_settings = scope.get_settings()
         for k, v in scope_settings.items():
@@ -230,7 +235,10 @@ def fetchAndSaveFast(
         start_time = time.time()
         while i < nevents:
             if not quiet:
-                print(f"\rSCOPE: fetching event: {i}", flush=True)
+                if nsequence == 1:
+                    print(f"\rSCOPE: fetching event: {i}", flush=True)
+                else:
+                    print(f"\rSCOPE: fetching events: {i}..{i+nsequence}", flush=True)
             time_from_start = time.time() - start_time
             logging.info(
                 "Event %d, from start of acquisition %.3f seconds",
@@ -250,7 +258,7 @@ def fetchAndSaveFast(
                         trg_offsets,
                         wave_array,
                     ) = scope.get_waveform_all(channel)
-                    logging.info("Data ready, took %.3f s", channel, time.time() - time_before_waveform_query)
+                    logging.info("Data ready, took %.3f s", time.time() - time_before_waveform_query)
                     time_before_packing_data_to_hdf = time.time()
                     num_samples = wave_desc["wave_array_count"] // sequence_count
                     num_samples_to_save = int(1 * num_samples)  ##TORemove
@@ -287,17 +295,17 @@ def fetchAndSaveFast(
         if i > 0:
             elapsed = time.time() - start_time
             print(f"Completed {i} events in {elapsed:.3f} seconds.")
-            print(f"Averaged {elapsed/i:.5f} seconds per acquisition.")
+            print(f"Averaged {elapsed/i:.5f} seconds per event.")
             for channel in active_channels:
                 print(f"Channel {channel}:")
                 datapoints_no = f[f"c{channel}_samples"].attrs["wave_array_count"]
                 no_samples = datapoints_no // nsequence
                 size_bytes = f[f"c{channel}_samples"].attrs["wave_array_1"]
-                print(
-                    f"\t {nsequence} (#seq) x {no_samples} (#samples) = {datapoints_no} (#datapoints)",
-                    end="",
-                )
-                print(f" - {datasize_human_readable(size_bytes)}")
+                print(f"\t {nsequence} (#seq)")
+                print(f"\t {no_samples} == {get_optimal_prefix(no_samples)} (#samples)")
+                print(f"\t {datapoints_no} == {get_optimal_prefix(datapoints_no)} (#datapoints)")
+                print(f"\t {datapoints_no} == {nsequence} x {no_samples}")
+                print(f"\t size of {nsequence} sequences: {datasize_human_readable(size_bytes)}")
                 sequence_length_sec = no_samples * f[f"c{channel}_horiz_scale"][-1]
                 print(f"\t sequence length {get_optimal_prefix(sequence_length_sec)}s")
                 vert_horiz_summary(
