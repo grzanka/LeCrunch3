@@ -235,18 +235,21 @@ class LeCrunch3(object):
         """
         logging.debug("Return a message from the scope.")
         reply = b""
+
         while True:
             header = b""
             while len(header) < 8:
                 header += self.sock.recv(8 - len(header))
             operation, headerver, seqnum, spare, totalbytes = struct.unpack(headerformat, header)
             buffer = b""
+            logging.debug("Header: total %d bytes", totalbytes)
             while len(buffer) < totalbytes:
+                logging.debug("Receiving %d bytes", totalbytes - len(buffer))
                 buffer += self.sock.recv(totalbytes - len(buffer))
             reply += buffer
             if operation % 2:
                 break
-        logging.debug("Buffer full")
+        logging.debug("Message received")
         return reply
 
     def check_last_command(self):
@@ -378,9 +381,14 @@ class LeCrunch3(object):
         if channel not in range(1, 5):
             raise Exception("channel must be in %s." % str(range(1, 5)))
 
+        # self.send("comm_header off")
         self.send("c%s:wf? all" % str(channel))
 
+        import time
+
+        time_now = time.time()
         msg = self.recv()
+        logging.debug("Receiving data took %.3f s", time.time() - time_now)
 
         if not int(chr(msg[1])) == channel:
             raise RuntimeError("waveforms out of sync or comm_header is off.")
